@@ -30,6 +30,8 @@ fn collect_wiki_links(markdown: &str) -> Vec<String> {
         match edge {
             NodeEdge::Start(node) if is_skipped(node) => skipped_depth += 1,
             NodeEdge::End(node) if is_skipped(node) => skipped_depth -= 1,
+            // 閉じない <a> の影響は段落などの外に出さない (表示でも Nokogiri がそこで閉じる)
+            NodeEdge::Start(node) if node.data().value.contains_inlines() => raw_link_depth = 0,
             NodeEdge::Start(node) if skipped_depth == 0 => {
                 if let NodeValue::HtmlInline(raw) = &node.data().value {
                     match raw_link_tag(raw) {

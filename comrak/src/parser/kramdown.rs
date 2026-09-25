@@ -441,15 +441,22 @@ mod tests {
 
     #[test]
     fn too_many_autocompleted_cells_stay_paragraph() {
-        let wide = format!("{}\n", "|".repeat(2_000));
-        let input = format!("{wide}{}", "a | b\n".repeat(300));
-        assert!(render(&input).starts_with("<p>"));
+        let wide = format!("{}\n", "a|".repeat(MAX_COLUMNS));
+        assert!(render(&format!("{wide}{}", "a|\n".repeat(400))).starts_with("<table>"));
+        assert!(render(&format!("{wide}{}", "a|\n".repeat(600))).starts_with("<p>"));
     }
 
     #[test]
     fn too_many_columns_stay_paragraph() {
         assert!(render(&format!("{}\n", "a|".repeat(MAX_COLUMNS))).starts_with("<table>"));
         assert!(render(&format!("{}\n", "a|".repeat(MAX_COLUMNS + 1))).starts_with("<p>"));
+    }
+
+    #[test]
+    fn only_list_like_thematic_breaks_interrupt_paragraph() {
+        assert_eq!(render("文章\n* * *\n次\n"), "<p>文章</p>\n<hr />\n<p>次</p>\n");
+        assert!(render("文章\n- - -\n").contains("<hr />"));
+        assert!(render("文章\n続き\n----\n").starts_with("<p>文章\n続き\n----"));
     }
 
     #[test]

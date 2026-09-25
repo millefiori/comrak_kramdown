@@ -1504,8 +1504,10 @@ where
         line: &str,
         all_matched: bool,
     ) -> Option<usize> {
-        let kramdown_paragraph =
-            self.options.parse.kramdown && node_matches!(container, NodeValue::Paragraph);
+        // Kramdown 互換: 段落に割り込めるのは、リスト記号としても読める `* * *` / `- - -` だけ (`----` は段落の文字)
+        let kramdown_paragraph = self.options.parse.kramdown
+            && node_matches!(container, NodeValue::Paragraph)
+            && parse_list_marker(line, self.first_nonspace, true, true).is_none();
         if !matches!(
             (&container.data().value, all_matched),
             (&NodeValue::Paragraph, false)
