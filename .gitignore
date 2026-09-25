@@ -1,0 +1,4 @@
+/ext/comrak_kramdown/target/
+/lib/comrak_kramdown/*.so
+/tmp/
+/comrak/target/

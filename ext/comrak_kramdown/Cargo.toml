@@ -1,0 +1,15 @@
+[package]
+name = "comrak_kramdown"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+
+[dependencies]
+magnus = "0.8"
+rb-sys = { version = "0.9", default-features = false, features = ["stable-api-compiled-fallback"] }
+comrak = { path = "../../comrak", default-features = false, features = ["attributes"] }
+
+[lib]
+name = "comrak_kramdown"
+crate-type = ["cdylib"]
