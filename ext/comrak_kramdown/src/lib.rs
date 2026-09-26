@@ -10,6 +10,7 @@ fn options() -> Options<'static> {
     options.parse.kramdown = true;
     options.extension.strikethrough = true;
     options.extension.footnotes = true;
+    options.extension.inline_footnotes = true;
     options.extension.description_lists = true;
     options.extension.cjk_friendly_emphasis = true;
     options.render.r#unsafe = true;

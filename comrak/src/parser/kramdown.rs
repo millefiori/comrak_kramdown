@@ -502,6 +502,22 @@ mod tests {
     }
 
     #[test]
+    fn inline_footnotes_scan_in_linear_time() {
+        let mut options = kramdown_options();
+        options.extension.footnotes = true;
+        options.extension.inline_footnotes = true;
+        let render = |input: &str| crate::markdown_to_html(input, &options);
+
+        assert!(render("^[[^[x]").contains("^[[<sup id=\"fnref:__inline_1\">"));
+        assert!(render("^[a \\] b]").contains("<p>a ] b&nbsp;"));
+        for input in ["^[".repeat(160_000), "[]^[x".repeat(40_000), "^[[]".repeat(80_000), "^[*".repeat(100_000)] {
+            let started = std::time::Instant::now();
+            render(&input);
+            assert!(started.elapsed().as_secs() < 2, "{}", &input[..10]);
+        }
+    }
+
+    #[test]
     fn unclosed_fences() {
         assert_eq!(unclosed_fence_lines("a\n```\nb\n"), HashSet::from([2]));
         assert!(unclosed_fence_lines("```\nb\n```\n").is_empty());

@@ -40,6 +40,7 @@ pub struct Subject<'a: 'd, 'r, 'o, 'd, 'c, 'p> {
     column_offset: isize,
     line_offset: usize,
     inline_footnote_depth: usize,
+    bracket_closers: Option<FxHashMap<usize, usize>>,
     flags: HtmlSkipFlags,
     pub refmap: &'r mut RefMap,
     footnote_defs: &'p mut FootnoteDefs<'a>,
@@ -83,6 +84,7 @@ impl<'a, 'r, 'o, 'd, 'c, 'p> Subject<'a, 'r, 'o, 'd, 'c, 'p> {
             column_offset: 0,
             line_offset: 0,
             inline_footnote_depth,
+            bracket_closers: None,
             flags: HtmlSkipFlags::default(),
             refmap,
             footnote_defs,
@@ -1124,35 +1126,44 @@ impl<'a, 'r, 'o, 'd, 'c, 'p> Subject<'a, 'r, 'o, 'd, 'c, 'p> {
         }
     }
 
+    /// `[` の位置から、対応する `]` の位置を返す。`\` は次の 1 byte をエスケープする。
+    /// `^[` ごとに段落の末尾まで探し直すと、閉じない `^[` の反復で段落の長さの 2 乗の時間がかかるので、
+    /// 対応表を段落につき 1 回だけ作る
+    fn bracket_closer(&mut self, opener: usize) -> Option<usize> {
+        let input = self.input.as_bytes();
+        let closers = self.bracket_closers.get_or_insert_with(|| {
+            let mut closers = FxHashMap::default();
+            let mut openers = vec![];
+            let mut i = 0;
+            while i < input.len() {
+                match input[i] {
+                    b'[' => openers.push(i),
+                    b']' => {
+                        if let Some(opener) = openers.pop() {
+                            closers.insert(opener, i);
+                        }
+                    }
+                    b'\\' if i + 1 < input.len() => i += 1,
+                    _ => {}
+                }
+                i += 1;
+            }
+            closers
+        });
+        closers.get(&opener).copied()
+    }
+
     fn handle_inline_footnote(&mut self) -> Option<Node<'a>> {
         let startpos = self.scanner.pos;
 
         // We're at ^, next should be [
         self.scanner.pos += 2; // Skip ^[
 
-        // Find the closing ]
-        let mut depth = 1;
-        let mut endpos = self.scanner.pos;
-        while endpos < self.input.len() && depth > 0 {
-            match self.input.as_bytes()[endpos] {
-                b'[' => depth += 1,
-                b']' => depth -= 1,
-                b'\\' if endpos + 1 < self.input.len() => {
-                    endpos += 1; // Skip escaped character
-                }
-                _ => {}
-            }
-            endpos += 1;
-        }
-
-        if depth != 0 {
+        let Some(endpos) = self.bracket_closer(startpos + 1) else {
             // No matching closing bracket, treat as regular text
             self.scanner.pos = startpos + 1;
             return Some(self.make_inline(NodeValue::Text("^".into()), startpos, startpos));
-        }
-
-        // endpos is now one past the ], so adjust
-        endpos -= 1;
+        };
 
         // Extract the content
         let content = &self.input[self.scanner.pos..endpos];
