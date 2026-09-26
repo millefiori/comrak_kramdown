@@ -9,7 +9,7 @@
 //!
 //! 公開される本文を通すので、どの走査も入力の長さに比例する時間で終わるようにしている。
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::Arena;
 use crate::nodes::{Ast, Attributes, LineColumn, Node, NodeTable, NodeValue, TableAlignment};
@@ -180,7 +180,31 @@ struct Row {
 struct Unclosed {
     code_element: bool,
     ruby: bool,
-    code_span_runs: HashSet<usize>,
+}
+
+/// バッククォートの列ごとに、コードスパンとして閉じるならその終わりの位置 (列の始まりの位置で引く)。
+/// 列の長さが毎回違う入力でも、行を 1 回走査するだけで決まる。
+fn code_span_ends(line: &str) -> HashMap<usize, Option<usize>> {
+    let bytes = line.as_bytes();
+    let mut runs = vec![];
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'`' {
+            let len = bytes[i..].iter().take_while(|&&b| b == b'`').count();
+            runs.push((i, len));
+            i += len;
+        } else {
+            i += 1;
+        }
+    }
+
+    let mut ends = HashMap::with_capacity(runs.len());
+    let mut next_run_end_by_len: HashMap<usize, usize> = HashMap::new();
+    for &(start, len) in runs.iter().rev() {
+        ends.insert(start, next_run_end_by_len.get(&len).copied());
+        next_run_end_by_len.insert(len, start + len);
+    }
+    ends
 }
 
 /// 行をセルに分ける。
@@ -189,12 +213,13 @@ fn split_row(line: &str) -> Row {
     let mut cells = vec![String::new()];
     let mut separators = 0;
     let mut unclosed = Unclosed::default();
+    let code_spans = if line.contains('`') { code_span_ends(line) } else { HashMap::new() };
     let mut i = 0;
 
     while i < bytes.len() {
         let rest = &line[i..];
         let protected = match bytes[i] {
-            b'`' => Some(code_span_len(rest, &mut unclosed)),
+            b'`' => Some(code_span_len(rest, i, &code_spans)),
             b'[' => wiki_link_len(rest),
             b'<' => code_element_len(rest, &mut unclosed),
             b'|' => ruby_len(rest, &mut unclosed),
@@ -224,27 +249,14 @@ fn split_row(line: &str) -> Row {
     Row { cells, separators }
 }
 
-/// Kramdown のコードスパン: 同じ長さのバッククォートの列で閉じる。閉じなければバッククォートだけ。
-fn code_span_len(s: &str, unclosed: &mut Unclosed) -> usize {
-    let bytes = s.as_bytes();
-    let open = bytes.iter().take_while(|&&b| b == b'`').count();
-    if unclosed.code_span_runs.contains(&open) {
-        return open;
+/// コードスパン: CommonMark と同じく、同じ長さのバッククォートの列で閉じる (comrak のインライン解析と揃える)。
+/// 閉じなければバッククォートだけ。
+fn code_span_len(rest: &str, start: usize, code_spans: &HashMap<usize, Option<usize>>) -> usize {
+    let open = rest.bytes().take_while(|&b| b == b'`').count();
+    match code_spans.get(&start) {
+        Some(Some(end)) => end - start,
+        _ => open,
     }
-    let mut i = open;
-    while i < bytes.len() {
-        if bytes[i] != b'`' {
-            i += 1;
-            continue;
-        }
-        let run = bytes[i..].iter().take_while(|&&b| b == b'`').count();
-        if run == open {
-            return i + run;
-        }
-        i += run;
-    }
-    unclosed.code_span_runs.insert(open);
-    open
 }
 
 /// `[[` + `[` と `]` 以外の 1 文字以上 + `]]`
@@ -423,6 +435,7 @@ mod tests {
         assert_eq!(cells("a | b 《c》 d | e"), ["a ", " b 《c》 d ", " e"]);
         assert_eq!(cells("a \\| b | c"), ["a | b ", " c"]);
         assert_eq!(cells("<code>a|b</code> | c"), ["<code>a|b</code> ", " c"]);
+        assert_eq!(cells("``a|`b`` | `c|d | e"), ["``a|`b`` ", " `c", "d ", " e"]);
     }
 
     #[test]
@@ -480,6 +493,7 @@ mod tests {
             "<code".repeat(80_000) + ">|",
             "|a《".repeat(40_000),
             "`".repeat(300) + &"x`".repeat(20_000) + "|",
+            (1..=1_000).map(|n| "`".repeat(n) + "x").collect::<String>() + &"y".repeat(1_000_000) + "|",
         ] {
             let started = std::time::Instant::now();
             has_separator(&line);

@@ -56,8 +56,11 @@ fn is_skipped(node: Node<'_>) -> bool {
     matches!(node.data().value, NodeValue::Link(..) | NodeValue::Image(..) | NodeValue::Code(..))
 }
 
-/// 生の HTML が `<a>` / `<tt>` の開きタグなら Some(true)、閉じタグなら Some(false)。
+/// 生の HTML が `<a>` / `<tt>` の開きタグなら Some(true)、閉じタグなら Some(false)。自己閉じは数えない。
 fn raw_link_tag(raw: &str) -> Option<bool> {
+    if raw.trim_end().ends_with("/>") {
+        return None;
+    }
     let tag = raw.strip_prefix('<')?;
     let (opening, tag) = match tag.strip_prefix('/') {
         Some(tag) => (false, tag),
