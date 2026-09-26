@@ -64,30 +64,30 @@ fn is_self_closing(raw: &str) -> bool {
         return false;
     };
     let bytes = body.as_bytes();
-    let mut i = bytes.iter().take_while(|b| b.is_ascii_alphanumeric()).count();
+    let mut i = bytes.iter().take_while(|&&b| is_name_char(b)).count();
     loop {
-        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        while i < bytes.len() && is_blank(bytes[i]) {
             i += 1;
         }
         if i == bytes.len() {
             return true;
         }
         let name_start = i;
-        while i < bytes.len() && !bytes[i].is_ascii_whitespace() && bytes[i] != b'=' && bytes[i] != b'/' {
+        while i < bytes.len() && !is_blank(bytes[i]) && bytes[i] != b'=' && bytes[i] != b'/' {
             i += 1;
         }
         if i == name_start && bytes[i] == b'/' {
             i += 1;
             continue;
         }
-        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        while i < bytes.len() && is_blank(bytes[i]) {
             i += 1;
         }
         if i == bytes.len() || bytes[i] != b'=' {
             continue;
         }
         i += 1;
-        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        while i < bytes.len() && is_blank(bytes[i]) {
             i += 1;
         }
         match bytes.get(i) {
@@ -96,7 +96,7 @@ fn is_self_closing(raw: &str) -> bool {
                 None => return false,
             },
             Some(_) => {
-                while i < bytes.len() && !bytes[i].is_ascii_whitespace() {
+                while i < bytes.len() && !is_blank(bytes[i]) {
                     i += 1;
                 }
                 // 引用符の無い値は空白までなので、行末まで続いたら最後の `/` は値の一部
@@ -104,9 +104,20 @@ fn is_self_closing(raw: &str) -> bool {
                     return false;
                 }
             }
-            None => return true,
+            // `=` の後に何も無い = 最後の `/` が引用符の無い値 (`<a href=/>`)
+            None => return false,
         }
     }
+}
+
+/// libxml2 の空白 (`\x0c` は含めない)
+fn is_blank(b: u8) -> bool {
+    matches!(b, b' ' | b'\t' | b'\n' | b'\r')
+}
+
+/// libxml2 のタグ名に使える文字
+fn is_name_char(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b':' | b'.')
 }
 
 fn raw_link_tag(raw: &str) -> Option<bool> {
@@ -118,7 +129,7 @@ fn raw_link_tag(raw: &str) -> Option<bool> {
         Some(tag) => (false, tag),
         None => (true, tag),
     };
-    let name_len = tag.find(|c: char| !c.is_ascii_alphanumeric()).unwrap_or(tag.len());
+    let name_len = tag.bytes().take_while(|&b| is_name_char(b)).count();
     let name = &tag[..name_len];
     (name.eq_ignore_ascii_case("a") || name.eq_ignore_ascii_case("tt")).then_some(opening)
 }
