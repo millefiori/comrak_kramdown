@@ -57,13 +57,56 @@ fn is_skipped(node: Node<'_>) -> bool {
 }
 
 /// 生の HTML が `<a>` / `<tt>` の開きタグなら Some(true)、閉じタグなら Some(false)。自己閉じは数えない。
-/// 表示側の libxml2 と同じく、`/>` の直前が空白・引用符・タグ名のときだけ自己閉じとみなす。
-/// `<a href=/foo/>` の `/` は引用符の無い属性値の一部で、開きタグになる。
+/// 表示側の libxml2 と同じく、タグの終わりの `/>` を自己閉じとみなす。
+/// タグの中を属性の構文どおりに読み、最後の `/` が引用符の無い属性値の一部 (`<a href=/foo/>`) なら自己閉じにしない。
 fn is_self_closing(raw: &str) -> bool {
-    let Some(body) = raw.trim_end().strip_suffix("/>").and_then(|b| b.strip_prefix('<')) else {
+    let Some(body) = raw.trim_end().strip_prefix('<').and_then(|b| b.strip_suffix("/>")) else {
         return false;
     };
-    body.ends_with([' ', '\t', '\r', '\n', '"', '\'']) || body.bytes().all(|b| b.is_ascii_alphanumeric())
+    let bytes = body.as_bytes();
+    let mut i = bytes.iter().take_while(|b| b.is_ascii_alphanumeric()).count();
+    loop {
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if i == bytes.len() {
+            return true;
+        }
+        let name_start = i;
+        while i < bytes.len() && !bytes[i].is_ascii_whitespace() && bytes[i] != b'=' && bytes[i] != b'/' {
+            i += 1;
+        }
+        if i == name_start && bytes[i] == b'/' {
+            i += 1;
+            continue;
+        }
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if i == bytes.len() || bytes[i] != b'=' {
+            continue;
+        }
+        i += 1;
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        match bytes.get(i) {
+            Some(&quote) if quote == b'"' || quote == b'\'' => match body[i + 1..].find(quote as char) {
+                Some(len) => i += len + 2,
+                None => return false,
+            },
+            Some(_) => {
+                while i < bytes.len() && !bytes[i].is_ascii_whitespace() {
+                    i += 1;
+                }
+                // 引用符の無い値は空白までなので、行末まで続いたら最後の `/` は値の一部
+                if i == bytes.len() {
+                    return false;
+                }
+            }
+            None => return true,
+        }
+    }
 }
 
 fn raw_link_tag(raw: &str) -> Option<bool> {
