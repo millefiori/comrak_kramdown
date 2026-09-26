@@ -57,8 +57,17 @@ fn is_skipped(node: Node<'_>) -> bool {
 }
 
 /// 生の HTML が `<a>` / `<tt>` の開きタグなら Some(true)、閉じタグなら Some(false)。自己閉じは数えない。
+/// 表示側の libxml2 と同じく、`/>` の直前が空白・引用符・タグ名のときだけ自己閉じとみなす。
+/// `<a href=/foo/>` の `/` は引用符の無い属性値の一部で、開きタグになる。
+fn is_self_closing(raw: &str) -> bool {
+    let Some(body) = raw.trim_end().strip_suffix("/>").and_then(|b| b.strip_prefix('<')) else {
+        return false;
+    };
+    body.ends_with([' ', '\t', '\r', '\n', '"', '\'']) || body.bytes().all(|b| b.is_ascii_alphanumeric())
+}
+
 fn raw_link_tag(raw: &str) -> Option<bool> {
-    if raw.trim_end().ends_with("/>") {
+    if is_self_closing(raw) {
         return None;
     }
     let tag = raw.strip_prefix('<')?;

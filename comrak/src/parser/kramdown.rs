@@ -249,8 +249,8 @@ fn split_row(line: &str) -> Row {
     Row { cells, separators }
 }
 
-/// コードスパン: CommonMark と同じく、同じ長さのバッククォートの列で閉じる (comrak のインライン解析と揃える)。
-/// 閉じなければバッククォートだけ。
+/// コードスパン: CommonMark と同じく、同じ長さのバッククォートの列で閉じる。閉じなければバッククォートだけ。
+/// セルの分割だけに使うので、エスケープした `` \` `` や 81 個以上の列 (comrak はコードスパンにしない) も保護する。
 fn code_span_len(rest: &str, start: usize, code_spans: &HashMap<usize, Option<usize>>) -> usize {
     let open = rest.bytes().take_while(|&b| b == b'`').count();
     match code_spans.get(&start) {
