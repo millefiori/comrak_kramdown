@@ -518,6 +518,30 @@ mod tests {
     }
 
     #[test]
+    fn nested_footnote_references_scan_in_linear_time() {
+        let mut options = kramdown_options();
+        options.extension.footnotes = true;
+        options.extension.inline_footnotes = true;
+        let render = |input: &str| crate::markdown_to_html(input, &options);
+
+        // 内側の `[^]` は脚注名が空で失敗するだけなので、外側は `[^*a*]` と同じく脚注名として読む (強調にしない)
+        assert_eq!(render("[^*a*[^]]"), "<p>[^*a*[^]]</p>\n");
+        // 走査が止まった後に開いた `[^b]` は走査する
+        assert!(render("[^a `c`] [^b]\n\n[^b]: x").starts_with("<p>[^a <code>c</code>] <sup id=\"fnref:b\">"));
+        for input in [
+            "[^".repeat(50_000) + &"]".repeat(50_000),
+            "[^x".repeat(50_000) + &"]".repeat(50_000),
+            "^[".repeat(50_000) + &"]".repeat(50_000),
+            // 1 回目の停止 (コード) の後に開いた `[` も、種類の違う 2 回目の停止 (複数行の HTML) の後は省く
+            "[^a `c`] ".to_string() + &"[^x".repeat(20_000) + "<a\nb>" + &"]".repeat(20_000),
+        ] {
+            let started = std::time::Instant::now();
+            render(&input);
+            assert!(started.elapsed().as_secs() < 2, "{}", &input[..12]);
+        }
+    }
+
+    #[test]
     fn unclosed_fences() {
         assert_eq!(unclosed_fence_lines("a\n```\nb\n"), HashSet::from([2]));
         assert!(unclosed_fence_lines("```\nb\n```\n").is_empty());

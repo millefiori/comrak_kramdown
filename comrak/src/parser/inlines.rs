@@ -41,6 +41,10 @@ pub struct Subject<'a: 'd, 'r, 'o, 'd, 'c, 'p> {
     line_offset: usize,
     inline_footnote_depth: usize,
     bracket_closers: Option<FxHashMap<usize, usize>>,
+    /// 脚注名の走査が途中で止まった (`sussy` になった) 回数。
+    /// 止めたノード (か、それを包んだリンク) はその時点で開いている `[` の中に残るので、それらの走査も必ずそこで止まる。
+    /// 回数が push 時から増えた `[` は走査しない。毎回走査すると、入れ子の `[^` で外側の `]` ごとに内側を辿り直し、段落の長さの 2 乗の時間がかかる
+    footnote_scan_stops: usize,
     flags: HtmlSkipFlags,
     pub refmap: &'r mut RefMap,
     footnote_defs: &'p mut FootnoteDefs<'a>,
@@ -85,6 +89,7 @@ impl<'a, 'r, 'o, 'd, 'c, 'p> Subject<'a, 'r, 'o, 'd, 'c, 'p> {
             line_offset: 0,
             inline_footnote_depth,
             bracket_closers: None,
+            footnote_scan_stops: 0,
             flags: HtmlSkipFlags::default(),
             refmap,
             footnote_defs,
@@ -1742,6 +1747,7 @@ impl<'a, 'r, 'o, 'd, 'c, 'p> Subject<'a, 'r, 'o, 'd, 'c, 'p> {
             position: self.scanner.pos,
             image,
             bracket_after: false,
+            footnote_scan_stops: self.footnote_scan_stops,
         });
         if !image {
             self.no_link_openers = false;
@@ -1902,6 +1908,7 @@ impl<'a, 'r, 'o, 'd, 'c, 'p> Subject<'a, 'r, 'o, 'd, 'c, 'p> {
         let bracket_inl_text = last.inl_text;
 
         if self.options.extension.footnotes
+            && last.footnote_scan_stops == self.footnote_scan_stops
             && bracket_inl_text.next_sibling().is_some_and(|n| {
                 n.data()
                     .value
@@ -1963,6 +1970,10 @@ impl<'a, 'r, 'o, 'd, 'c, 'p> Subject<'a, 'r, 'o, 'd, 'c, 'p> {
                         break;
                     }
                 };
+            }
+
+            if sussy {
+                self.footnote_scan_stops += 1;
             }
 
             if !sussy && text.len() > 1 {
@@ -2537,6 +2548,8 @@ struct Bracket<'a> {
     position: usize,
     image: bool,
     bracket_after: bool,
+    /// push 時の `Subject::footnote_scan_stops`
+    footnote_scan_stops: usize,
 }
 
 #[derive(Clone)]
