@@ -786,12 +786,13 @@ impl<'a, 'r, 'o, 'd, 'c, 'p> Subject<'a, 'r, 'o, 'd, 'c, 'p> {
     }
 
     /// Kramdown 互換: Kramdown と同じく `[[...]]` の中を markdown として解釈せず、そのまま HTML に出す。
+    /// `<` だけは HTML のタグとして読まれて後ろの本文を飲み込むので `&lt;` にする。
     /// wiki link への変換は呼び出し側が行う。
     fn handle_kramdown_wiki_link(&mut self, parent_line_offsets: &[usize]) -> Node<'a> {
         let start = self.scanner.pos;
         let len = super::kramdown::wiki_link_len(&self.input[start..]).unwrap();
         self.scanner.pos += len;
-        let raw = self.input[start..self.scanner.pos].to_string();
+        let raw = self.input[start..self.scanner.pos].replace('<', "&lt;");
         let inl = self.make_inline(NodeValue::HtmlInline(raw), start, self.scanner.pos - 1);
         self.adjust_node_newlines(inl, len, 0, parent_line_offsets);
         inl

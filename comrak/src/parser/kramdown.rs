@@ -479,6 +479,16 @@ mod tests {
     }
 
     #[test]
+    fn wiki_link_escapes_less_than() {
+        let mut options = kramdown_options();
+        options.render.r#unsafe = true;
+        let render = |input: &str| crate::markdown_to_html(input, &options);
+
+        assert_eq!(render("前 [[a|b<c>d]] 後\n"), "<p>前 [[a|b&lt;c>d]] 後</p>\n");
+        assert_eq!(render("`[[a<b]]`\n"), "<p><code>[[a&lt;b]]</code></p>\n");
+    }
+
+    #[test]
     fn rows_split_on_bare_carriage_return() {
         assert_eq!(render("a | b\rc | d\n"), render("a | b\nc | d\n"));
         assert!(render("a | `b\rc` | d\n").starts_with("<table>"));
