@@ -17,6 +17,8 @@ use crate::parser::table::MAX_AUTOCOMPLETED_CELLS;
 
 /// これより列の多い段落は表にしない。表の描画は 1 行あたり列数の 2 乗の時間がかかる (html.rs の render_table_cell)
 const MAX_COLUMNS: usize = 1_000;
+// 補うセルの上限は表ごとなので、上限の内側の表を並べた文書でもセルの数に上限を置く
+pub(crate) const MAX_TABLE_CELLS_PER_DOCUMENT: usize = 50_000;
 
 /// 行に、セルの区切りになる `|` が 1 つ以上あるか。
 pub fn has_separator(line: &str) -> bool {
@@ -28,7 +30,13 @@ pub fn has_separator(line: &str) -> bool {
 }
 
 /// 段落を表に置き換える。表にならないときは何もせず false を返す。
-pub fn try_table<'a>(arena: &'a Arena<'a>, node: Node<'a>, ast: &mut Ast) -> bool {
+/// table_cells は文書の中でこれまでに作った表のセルの数で、合計が上限を超える表は作らない。
+pub fn try_table<'a>(
+    arena: &'a Arena<'a>,
+    node: Node<'a>,
+    ast: &mut Ast,
+    table_cells: &mut usize,
+) -> bool {
     let lines: Vec<&str> = split_lines(&ast.content)
         .map(|line| line.trim_end_matches(['\n', '\r', ' ', '\t']))
         .collect();
@@ -38,6 +46,11 @@ pub fn try_table<'a>(arena: &'a Arena<'a>, node: Node<'a>, ast: &mut Ast) -> boo
     let Some((rows, header_rows, alignments)) = parse_rows(&lines) else {
         return false;
     };
+    let cells = rows.len() * alignments.len();
+    if *table_cells + cells > MAX_TABLE_CELLS_PER_DOCUMENT {
+        return false;
+    }
+    *table_cells += cells;
     append_rows(arena, node, ast, rows, header_rows, alignments);
     true
 }
@@ -458,6 +471,16 @@ mod tests {
         let rows_at_limit = MAX_AUTOCOMPLETED_CELLS / (MAX_COLUMNS - 1);
         assert!(render(&format!("{wide}{}", "a|\n".repeat(rows_at_limit))).starts_with("<table>"));
         assert!(render(&format!("{wide}{}", "a|\n".repeat(rows_at_limit + 1))).starts_with("<p>"));
+    }
+
+    #[test]
+    fn tables_beyond_document_cell_limit_stay_paragraph() {
+        let columns = 100;
+        let rows = MAX_TABLE_CELLS_PER_DOCUMENT / columns / 2;
+        let table = format!("{}\n", "a|".repeat(columns)).repeat(rows);
+        let html = render(&format!("{table}\n{table}\n{table}"));
+        assert_eq!(html.matches("<table>").count(), 2);
+        assert!(html.contains("</table>\n<p>a|"));
     }
 
     #[test]

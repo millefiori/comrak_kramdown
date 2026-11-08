@@ -136,6 +136,7 @@ pub struct Parser<'a, 'o, 'c> {
     total_size: usize,
     kramdown_prev_line_blank: bool,
     kramdown_unclosed_fences: HashSet<usize>,
+    kramdown_table_cells: usize,
     #[cfg(feature = "phoenix_heex")]
     heex_block_depth: usize,
 }
@@ -184,6 +185,7 @@ where
             total_size: 0,
             kramdown_prev_line_blank: true,
             kramdown_unclosed_fences: HashSet::new(),
+            kramdown_table_cells: 0,
             #[cfg(feature = "phoenix_heex")]
             heex_block_depth: 0,
         }
@@ -2242,7 +2244,7 @@ where
                 if !has_content {
                     node.detach();
                 } else if self.options.parse.kramdown && ast.kramdown_table_candidate {
-                    kramdown::try_table(self.arena, node, ast);
+                    kramdown::try_table(self.arena, node, ast, &mut self.kramdown_table_cells);
                 }
             }
             NodeValue::CodeBlock(ref mut ncb) => {
