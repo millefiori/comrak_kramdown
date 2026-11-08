@@ -207,3 +207,38 @@ fn reopened_description_lists_finalize_in_linear_time() {
         assert!(started.elapsed().as_secs() < 2, "{}", &input[..20]);
     }
 }
+
+#[test]
+fn sourcepos_of_details_followed_by_another_block() {
+    // 閉じた項目の後ろに別のブロックが続くと、説明の終わりの列は 0 になってから直される
+    assert_ast_match!(
+        [extension.description_lists],
+        "a\n"
+        ": b\n"
+        "\n"
+        "- x\n",
+        (document (1:1-4:3) [
+            (description_list (1:1-3:0) [
+                (description_item (1:1-3:0) [
+                    (description_term (1:1-1:1) [
+                        (paragraph (1:1-1:1) [
+                            (text (1:1-1:1) "a")
+                        ])
+                    ])
+                    (description_details (2:1-2:3) [
+                        (paragraph (2:3-2:3) [
+                            (text (2:3-2:3) "b")
+                        ])
+                    ])
+                ])
+            ])
+            (list (4:1-4:3) [
+                (item (4:1-4:3) [
+                    (paragraph (4:3-4:3) [
+                        (text (4:3-4:3) "x")
+                    ])
+                ])
+            ])
+        ])
+    );
+}

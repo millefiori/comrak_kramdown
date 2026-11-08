@@ -3,6 +3,7 @@ mod cjk;
 use std::borrow::Cow;
 use std::cell::Cell;
 use std::convert::TryFrom;
+use std::rc::Rc;
 use std::str;
 use std::{mem, ptr};
 
@@ -40,7 +41,11 @@ pub struct Subject<'a: 'd, 'r, 'o, 'd, 'c, 'p> {
     column_offset: isize,
     line_offset: usize,
     inline_footnote_depth: usize,
-    bracket_closers: Option<FxHashMap<usize, usize>>,
+    /// `[` と、対応する `]` の位置の組を `[` の位置の順に並べた表 (段落につき 1 つ)。
+    /// inline 脚注の中身は段落の部分文字列なので、中身の Subject は段落の表を `bracket_offset` だけずらして引く
+    bracket_closers: Option<Rc<Vec<(usize, usize)>>>,
+    /// この Subject の `input` の先頭が、`bracket_closers` を作った段落のどこにあるか
+    bracket_offset: usize,
     /// 脚注名の走査が途中で止まった (`sussy` になった) 回数。
     /// 止めたノード (か、それを包んだリンク) はその時点で開いている `[` の中に残るので、それらの走査も必ずそこで止まる。
     /// 回数が push 時から増えた `[` は走査しない。毎回走査すると、入れ子の `[^` で外側の `]` ごとに内側を辿り直し、段落の長さの 2 乗の時間がかかる
@@ -89,6 +94,7 @@ impl<'a, 'r, 'o, 'd, 'c, 'p> Subject<'a, 'r, 'o, 'd, 'c, 'p> {
             line_offset: 0,
             inline_footnote_depth,
             bracket_closers: None,
+            bracket_offset: 0,
             footnote_scan_stops: 0,
             flags: HtmlSkipFlags::default(),
             refmap,
@@ -1135,11 +1141,12 @@ impl<'a, 'r, 'o, 'd, 'c, 'p> Subject<'a, 'r, 'o, 'd, 'c, 'p> {
 
     /// `[` の位置から、対応する `]` の位置を返す。`\` は次の 1 byte をエスケープする。
     /// `^[` ごとに段落の末尾まで探し直すと、閉じない `^[` の反復で段落の長さの 2 乗の時間がかかるので、
-    /// 対応表を段落につき 1 回だけ作る
+    /// 対応表を段落につき 1 回だけ作る。hash でなく並べた配列にし、入れ子の inline 脚注とも共有するのは、
+    /// 括弧の組を並べた段落で表のメモリが入れ子の段の数だけ増えないようにするため
     fn bracket_closer(&mut self, opener: usize) -> Option<usize> {
         let input = self.input.as_bytes();
         let closers = self.bracket_closers.get_or_insert_with(|| {
-            let mut closers = FxHashMap::default();
+            let mut closers = vec![];
             let mut openers = vec![];
             let mut i = 0;
             while i < input.len() {
@@ -1147,7 +1154,7 @@ impl<'a, 'r, 'o, 'd, 'c, 'p> Subject<'a, 'r, 'o, 'd, 'c, 'p> {
                     b'[' => openers.push(i),
                     b']' => {
                         if let Some(opener) = openers.pop() {
-                            closers.insert(opener, i);
+                            closers.push((opener, i));
                         }
                     }
                     b'\\' if i + 1 < input.len() => i += 1,
@@ -1155,9 +1162,12 @@ impl<'a, 'r, 'o, 'd, 'c, 'p> Subject<'a, 'r, 'o, 'd, 'c, 'p> {
                 }
                 i += 1;
             }
-            closers
+            closers.sort_unstable();
+            Rc::new(closers)
         });
-        closers.get(&opener).copied()
+        let opener = opener + self.bracket_offset;
+        let index = closers.binary_search_by_key(&opener, |&(opener, _)| opener).ok()?;
+        Some(closers[index].1 - self.bracket_offset)
     }
 
     fn handle_inline_footnote(&mut self) -> Option<Node<'a>> {
@@ -1248,6 +1258,8 @@ impl<'a, 'r, 'o, 'd, 'c, 'p> Subject<'a, 'r, 'o, 'd, 'c, 'p> {
             &delimiter_arena,
             self.inline_footnote_depth + 1,
         );
+        subj.bracket_closers = self.bracket_closers.clone();
+        subj.bracket_offset = self.bracket_offset + startpos + 2;
 
         while subj.parse_inline(para_node, &mut para_node.data_mut()) {}
         subj.process_emphasis(0);
