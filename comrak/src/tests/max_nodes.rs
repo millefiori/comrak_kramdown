@@ -1,4 +1,4 @@
-use std::panic;
+use std::panic::{self, AssertUnwindSafe};
 
 use crate::{Arena, NodeLimitExceeded, Options, markdown_to_html, parse_document};
 
@@ -14,6 +14,12 @@ fn options(max_nodes: usize) -> Options<'static> {
 
 fn paragraphs() -> String {
     "a\n\n".repeat(PARAGRAPHS)
+}
+
+fn count_nodes(input: &str, options: &Options) -> usize {
+    let arena = Arena::new();
+    parse_document(&arena, input, options);
+    arena.len()
 }
 
 #[test]
@@ -32,15 +38,47 @@ fn documents_beyond_max_nodes_unwind_with_node_limit_exceeded() {
 
 #[test]
 fn inline_nodes_count_toward_max_nodes() {
-    let input = "*a* ".repeat(PARAGRAPHS);
-    let arena = Arena::new();
-    parse_document(&arena, &input, &Options::default());
-    let nodes = arena.len();
+    let emphases = 100;
+    let input = "*a* ".repeat(emphases);
+    let nodes = count_nodes(&input, &Options::default());
     // 文書と段落の 2 つの後に、強調と文字の node が続く
-    assert!(nodes > PARAGRAPHS * 2);
+    assert!(nodes > 2 + emphases);
     assert!(panic::catch_unwind(|| markdown_to_html(&input, &options(nodes))).is_ok());
     let payload = panic::catch_unwind(|| markdown_to_html(&input, &options(nodes - 1))).unwrap_err();
     assert!(payload.is::<NodeLimitExceeded>());
+}
+
+#[test]
+fn every_kind_of_node_stops_at_max_nodes() {
+    // node を作る所 (ブロック・inline・リンク・Kramdown と GFM の表・inline 脚注・定義の無い脚注参照・リストと表のセルのタスク) を通る文書
+    let mut kramdown = Options::default();
+    kramdown.parse.kramdown = true;
+    kramdown.extension.footnotes = true;
+    kramdown.extension.inline_footnotes = true;
+    kramdown.extension.tasklist = true;
+    let mut gfm = Options::default();
+    gfm.extension.table = true;
+    gfm.extension.footnotes = true;
+    gfm.extension.tasklist = true;
+    gfm.parse.tasklist_in_table = true;
+    let documents = [
+        (kramdown, "a | b\nc | d\n\n- [ ] e ^[f] [^g] [h](i)\n"),
+        (gfm, "x\n| a | b |\n|---|---|\n| [ ] | d |\n\n- [ ] e [^g] [h](i)\n"),
+    ];
+    for (options, input) in documents {
+        let nodes = count_nodes(input, &options);
+        for max_nodes in 1..nodes {
+            let mut limited = options.clone();
+            limited.parse.max_nodes = Some(max_nodes);
+            let arena = Arena::new();
+            let parsed = panic::catch_unwind(AssertUnwindSafe(|| {
+                parse_document(&arena, input, &limited);
+            }));
+            assert!(parsed.unwrap_err().is::<NodeLimitExceeded>());
+            // 上限を見ずに node を作る所があると、止まるまでに上限を超えて作る
+            assert_eq!(arena.len(), max_nodes, "{input:?}");
+        }
+    }
 }
 
 #[test]

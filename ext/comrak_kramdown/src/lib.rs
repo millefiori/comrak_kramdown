@@ -139,15 +139,11 @@ fn raw_link_tag(raw: &str) -> Option<bool> {
     (name.eq_ignore_ascii_case("a") || name.eq_ignore_ascii_case("tt")).then_some(opening)
 }
 
-/// magnus は Rust の panic を rescue できない fatal にするので、Ruby の例外に変える。
-/// node の数の上限で解析をやめたときは NodeLimitExceeded、それ以外は RuntimeError
+/// magnus は Rust の panic を rescue できない fatal にするので、Ruby の例外に変える
 fn catch_panic<T>(ruby: &Ruby, work: impl FnOnce() -> T + panic::UnwindSafe) -> Result<T, Error> {
     panic::catch_unwind(work).map_err(|payload| {
         if payload.is::<NodeLimitExceeded>() {
-            return match node_limit_exceeded(ruby) {
-                Ok(class) => Error::new(class, format!("AST の node の数が上限の {MAX_NODES} を超えた")),
-                Err(error) => error,
-            };
+            return node_limit_exceeded_error(ruby);
         }
         let detail = payload
             .downcast_ref::<&str>()
@@ -158,8 +154,15 @@ fn catch_panic<T>(ruby: &Ruby, work: impl FnOnce() -> T + panic::UnwindSafe) -> 
     })
 }
 
-fn node_limit_exceeded(ruby: &Ruby) -> Result<ExceptionClass, Error> {
-    ruby.class_object().const_get::<_, RModule>("ComrakKramdown")?.const_get("NodeLimitExceeded")
+fn node_limit_exceeded_error(ruby: &Ruby) -> Error {
+    let class = ruby
+        .class_object()
+        .const_get::<_, RModule>("ComrakKramdown")
+        .and_then(|module| module.const_get::<_, ExceptionClass>("NodeLimitExceeded"));
+    match class {
+        Ok(class) => Error::new(class, format!("AST の node の数が上限の {MAX_NODES} を超えた")),
+        Err(error) => error,
+    }
 }
 
 fn to_html(ruby: &Ruby, markdown: RString) -> Result<String, Error> {

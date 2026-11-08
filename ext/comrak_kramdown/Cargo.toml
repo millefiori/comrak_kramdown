@@ -13,3 +13,7 @@ comrak = { path = "../../comrak", default-features = false, features = ["attribu
 [lib]
 name = "comrak_kramdown"
 crate-type = ["cdylib"]
+
+# 解析の上限と panic を catch_unwind で受けて Ruby の例外にするので、abort にしない
+[profile.release]
+panic = "unwind"

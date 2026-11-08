@@ -48,27 +48,27 @@ pub struct NodeLimitExceeded;
 
 thread_local! {
     /// 解析中の文書の `max_nodes`。node を作る所の多くは options を持たないので、解析の間だけここに置く
-    static MAX_NODES: Cell<Option<usize>> = const { Cell::new(None) };
+    static CURRENT_MAX_NODES: Cell<Option<usize>> = const { Cell::new(None) };
 }
 
-/// 解析の間だけ [`MAX_NODES`] を置き、unwind したときも元に戻す
+/// 解析の間だけ [`CURRENT_MAX_NODES`] を置き、unwind したときも元に戻す
 struct MaxNodesScope(Option<usize>);
 
 impl MaxNodesScope {
     fn enter(max_nodes: Option<usize>) -> Self {
-        Self(MAX_NODES.replace(max_nodes))
+        Self(CURRENT_MAX_NODES.replace(max_nodes))
     }
 }
 
 impl Drop for MaxNodesScope {
     fn drop(&mut self) {
-        MAX_NODES.set(self.0);
+        CURRENT_MAX_NODES.set(self.0);
     }
 }
 
 /// node を arena に作る。上限に達していたら、panic hook を通さずに [`NodeLimitExceeded`] で unwind する
 pub(crate) fn alloc_node<'a>(arena: &'a Arena<'a>, ast: Ast) -> Node<'a> {
-    if MAX_NODES.get().is_some_and(|max| arena.len() >= max) {
+    if CURRENT_MAX_NODES.get().is_some_and(|max| arena.len() >= max) {
         std::panic::resume_unwind(Box::new(NodeLimitExceeded));
     }
     arena.alloc(ast.into())
@@ -80,7 +80,7 @@ pub(crate) fn alloc_node<'a>(arena: &'a Arena<'a>, ast: Ast) -> Node<'a> {
 ///
 /// `options.parse.max_nodes` を超える文書は、[`NodeLimitExceeded`] で unwind する。
 pub fn parse_document<'a>(arena: &'a Arena<'a>, md: &str, options: &Options) -> Node<'a> {
-    let _max_nodes = MaxNodesScope::enter(options.parse.max_nodes);
+    let _max_nodes_scope = MaxNodesScope::enter(options.parse.max_nodes);
     let root = alloc_node(
         arena,
         Ast {
@@ -802,11 +802,12 @@ where
                         stack.push((c, false));
                     }
                 } else {
-                    {
+                    let end_col = {
                         let mut ast = node.data_mut();
+                        // 開いている node にはまだ子が足されうるので、閉じた node にだけ印を付ける
                         ast.end_columns_fixed = !ast.open;
-                    }
-                    let end_col = node.data().sourcepos.end.column;
+                        ast.sourcepos.end.column
+                    };
                     if end_col == 0 {
                         if let Some(mut last_desc) = node.last_child() {
                             while let Some(ld) = last_desc.last_child() {
