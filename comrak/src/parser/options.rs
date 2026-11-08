@@ -881,6 +881,13 @@ pub struct Parse<'c> {
     #[cfg_attr(feature = "bon", builder(default))]
     pub kramdown: bool,
 
+    /// arena に置ける AST の node の数の上限。`None` なら上限なし。
+    ///
+    /// node は 1 つ数百バイトを使い、HTML の出力も node の数に比例するので、大きな文書を受け取る側はこれで縛る。
+    /// 上限に達した後に node を作ろうとすると、解析をやめて [`crate::NodeLimitExceeded`] で unwind する
+    /// (panic hook は通らない)。呼び出し側は [`std::panic::catch_unwind`] で受ける。
+    pub max_nodes: Option<usize>,
+
     /// In case the parser encounters any potential links that have a broken
     /// reference (e.g `[foo]` when there is no `[foo]: url` entry at the
     /// bottom) the provided callback will be called with the reference name,

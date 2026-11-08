@@ -2,12 +2,16 @@ use std::panic;
 
 use comrak::arena_tree::NodeEdge;
 use comrak::nodes::{Node, NodeValue};
-use comrak::{Arena, Options, markdown_to_html, parse_document};
-use magnus::{Error, RString, Ruby, function, prelude::*};
+use comrak::{Arena, NodeLimitExceeded, Options, markdown_to_html, parse_document};
+use magnus::{Error, ExceptionClass, RModule, RString, Ruby, function, prelude::*};
+
+/// 1 つの文書の AST の node の数の上限。node は 1 つ数百バイトなので、上限の文書でも数十 MB に収まる
+const MAX_NODES: usize = 100_000;
 
 fn options() -> Options<'static> {
     let mut options = Options::default();
     options.parse.kramdown = true;
+    options.parse.max_nodes = Some(MAX_NODES);
     options.extension.strikethrough = true;
     options.extension.footnotes = true;
     options.extension.inline_footnotes = true;
@@ -135,9 +139,16 @@ fn raw_link_tag(raw: &str) -> Option<bool> {
     (name.eq_ignore_ascii_case("a") || name.eq_ignore_ascii_case("tt")).then_some(opening)
 }
 
-/// magnus は Rust の panic を rescue できない fatal にするので、RuntimeError に変える
+/// magnus は Rust の panic を rescue できない fatal にするので、Ruby の例外に変える。
+/// node の数の上限で解析をやめたときは NodeLimitExceeded、それ以外は RuntimeError
 fn catch_panic<T>(ruby: &Ruby, work: impl FnOnce() -> T + panic::UnwindSafe) -> Result<T, Error> {
     panic::catch_unwind(work).map_err(|payload| {
+        if payload.is::<NodeLimitExceeded>() {
+            return match node_limit_exceeded(ruby) {
+                Ok(class) => Error::new(class, format!("AST の node の数が上限の {MAX_NODES} を超えた")),
+                Err(error) => error,
+            };
+        }
         let detail = payload
             .downcast_ref::<&str>()
             .map(|s| s.to_string())
@@ -145,6 +156,10 @@ fn catch_panic<T>(ruby: &Ruby, work: impl FnOnce() -> T + panic::UnwindSafe) -> 
             .unwrap_or_default();
         Error::new(ruby.exception_runtime_error(), format!("markdown の変換中に panic した: {detail}"))
     })
+}
+
+fn node_limit_exceeded(ruby: &Ruby) -> Result<ExceptionClass, Error> {
+    ruby.class_object().const_get::<_, RModule>("ComrakKramdown")?.const_get("NodeLimitExceeded")
 }
 
 fn to_html(ruby: &Ruby, markdown: RString) -> Result<String, Error> {
@@ -160,6 +175,8 @@ fn wiki_links(ruby: &Ruby, markdown: RString) -> Result<Vec<String>, Error> {
 #[magnus::init]
 fn init(ruby: &Ruby) -> Result<(), Error> {
     let module = ruby.define_module("ComrakKramdown")?;
+    module.define_error("NodeLimitExceeded", ruby.exception_standard_error())?;
+    module.const_set("MAX_NODES", MAX_NODES)?;
     module.define_singleton_method("to_html", function!(to_html, 1))?;
     module.define_singleton_method("wiki_links", function!(wiki_links, 1))?;
     Ok(())

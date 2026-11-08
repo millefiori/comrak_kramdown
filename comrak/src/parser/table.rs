@@ -3,7 +3,7 @@ use std::cmp::min;
 use std::mem;
 
 use crate::nodes::{Ast, LineColumn, Node, NodeTable, NodeValue, TableAlignment};
-use crate::parser::Parser;
+use crate::parser::{Parser, alloc_node};
 use crate::scanners;
 use crate::strings::{count_newlines, is_line_end_char, newlines_of, trim_cow};
 
@@ -97,7 +97,7 @@ fn try_opening_header<'a>(
         })),
         start,
     );
-    let table = parser.arena.alloc(child.into());
+    let table = alloc_node(parser.arena, child);
     container.append(table);
 
     let header = parser.add_child(table, NodeValue::TableRow(true), start.column);
@@ -325,7 +325,7 @@ fn try_inserting_table_header_paragraph<'a>(
     container_ast.sourcepos.start.column = container_ast.line_offsets[newlines] + 1;
 
     paragraph.content = paragraph_content;
-    let node = parser.arena.alloc(paragraph.into());
+    let node = alloc_node(parser.arena, paragraph);
     container.insert_before(node);
 }
 

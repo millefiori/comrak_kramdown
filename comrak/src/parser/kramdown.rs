@@ -13,6 +13,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::Arena;
 use crate::nodes::{Ast, Attributes, LineColumn, Node, NodeTable, NodeValue, TableAlignment};
+use crate::parser::alloc_node;
 use crate::parser::table::MAX_AUTOCOMPLETED_CELLS;
 
 /// これより列の多い段落は表にしない。表の描画は 1 行あたり列数の 2 乗の時間がかかる (html.rs の render_table_cell)
@@ -139,7 +140,7 @@ fn append_rows<'a>(
 fn new_node<'a>(arena: &'a Arena<'a>, value: NodeValue, start: LineColumn) -> Node<'a> {
     let mut ast = Ast::new(value, start);
     ast.open = false;
-    arena.alloc(ast.into())
+    alloc_node(arena, ast)
 }
 
 /// Ruby の String#strip と同じく、前後の ASCII の空白と NUL を落とす (全角空白は残す)。

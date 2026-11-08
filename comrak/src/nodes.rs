@@ -813,6 +813,8 @@ pub struct Ast {
     pub(crate) last_line_blank: bool,
     pub(crate) table_visited: bool,
     pub(crate) kramdown_table_candidate: bool,
+    /// sourcepos の終わりの列が 0 のものを、この node と子孫について直し終えたか (fix_zero_end_columns)
+    pub(crate) end_columns_fixed: bool,
     pub(crate) line_offsets: Vec<usize>,
 }
 
@@ -940,6 +942,7 @@ impl Ast {
             last_line_blank: false,
             table_visited: false,
             kramdown_table_candidate: true,
+            end_columns_fixed: false,
             line_offsets: Vec::new(),
         }
     }
@@ -956,6 +959,7 @@ impl Ast {
             last_line_blank: false,
             table_visited: false,
             kramdown_table_candidate: true,
+            end_columns_fixed: false,
             line_offsets: Vec::new(),
         }
     }

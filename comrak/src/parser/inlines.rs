@@ -22,7 +22,7 @@ use crate::parser::inlines::cjk::FlankingCheckHelper;
 use crate::parser::options::{BrokenLinkReference, WikiLinksMode};
 #[cfg(feature = "shortcodes")]
 use crate::parser::shortcodes::NodeShortCode;
-use crate::parser::{AutolinkType, Options, ResolvedReference, autolink};
+use crate::parser::{AutolinkType, Options, ResolvedReference, alloc_node, autolink};
 use crate::scanners;
 use crate::strings::{self, Case, count_newlines, is_blank};
 
@@ -184,9 +184,10 @@ impl<'a, 'r, 'o, 'd, 'c, 'p> Subject<'a, 'r, 'o, 'd, 'c, 'p> {
             last_line_blank: false,
             table_visited: false,
             kramdown_table_candidate: true,
+            end_columns_fixed: false,
             line_offsets: Vec::new(),
         };
-        self.arena.alloc(ast.into())
+        alloc_node(self.arena, ast)
     }
 
     fn make_autolink(
@@ -1196,15 +1197,15 @@ impl<'a, 'r, 'o, 'd, 'c, 'p> Subject<'a, 'r, 'o, 'd, 'c, 'p> {
         );
 
         // Parse the content as inlines
-        let def_node = self.arena.alloc(
+        let def_node = alloc_node(
+            self.arena,
             Ast::new(
                 NodeValue::FootnoteDefinition(NodeFootnoteDefinition {
                     name,
                     total_references: 0,
                 }),
                 (self.line, 1).into(),
-            )
-            .into(),
+            ),
         );
 
         // Create a paragraph to hold the inline content
@@ -1232,7 +1233,7 @@ impl<'a, 'r, 'o, 'd, 'c, 'p> Subject<'a, 'r, 'o, 'd, 'c, 'p> {
             i += 1;
         }
 
-        let para_node = self.arena.alloc(para_ast.into());
+        let para_node = alloc_node(self.arena, para_ast);
         def_node.append(para_node);
 
         // Parse the content recursively as inlines
@@ -2643,9 +2644,10 @@ pub(crate) fn make_inline<'a>(
         last_line_blank: false,
         table_visited: false,
         kramdown_table_candidate: true,
+        end_columns_fixed: false,
         line_offsets: Vec::new(),
     };
-    arena.alloc(ast.into())
+    alloc_node(arena, ast)
 }
 
 #[derive(Default)]

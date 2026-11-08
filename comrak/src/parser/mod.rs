@@ -11,6 +11,7 @@ pub mod shortcodes;
 mod table;
 
 use std::borrow::Cow;
+use std::cell::Cell;
 use std::cmp::{Ordering, min};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::Debug;
@@ -40,11 +41,48 @@ const CODE_INDENT: usize = 4;
 // be nested this deeply.
 const MAX_LIST_DEPTH: usize = 100;
 
+/// [`Parse::max_nodes`](options::Parse::max_nodes) を超えて node を作ろうとしたとき、
+/// 解析をやめるために [`std::panic::resume_unwind`] で投げる値
+#[derive(Debug, Clone, Copy)]
+pub struct NodeLimitExceeded;
+
+thread_local! {
+    /// 解析中の文書の `max_nodes`。node を作る所の多くは options を持たないので、解析の間だけここに置く
+    static MAX_NODES: Cell<Option<usize>> = const { Cell::new(None) };
+}
+
+/// 解析の間だけ [`MAX_NODES`] を置き、unwind したときも元に戻す
+struct MaxNodesScope(Option<usize>);
+
+impl MaxNodesScope {
+    fn enter(max_nodes: Option<usize>) -> Self {
+        Self(MAX_NODES.replace(max_nodes))
+    }
+}
+
+impl Drop for MaxNodesScope {
+    fn drop(&mut self) {
+        MAX_NODES.set(self.0);
+    }
+}
+
+/// node を arena に作る。上限に達していたら、panic hook を通さずに [`NodeLimitExceeded`] で unwind する
+pub(crate) fn alloc_node<'a>(arena: &'a Arena<'a>, ast: Ast) -> Node<'a> {
+    if MAX_NODES.get().is_some_and(|max| arena.len() >= max) {
+        std::panic::resume_unwind(Box::new(NodeLimitExceeded));
+    }
+    arena.alloc(ast.into())
+}
+
 /// Parse a Markdown document to an AST.
 ///
 /// See the documentation of the crate root for an example.
+///
+/// `options.parse.max_nodes` を超える文書は、[`NodeLimitExceeded`] で unwind する。
 pub fn parse_document<'a>(arena: &'a Arena<'a>, md: &str, options: &Options) -> Node<'a> {
-    let root = arena.alloc(
+    let _max_nodes = MaxNodesScope::enter(options.parse.max_nodes);
+    let root = alloc_node(
+        arena,
         Ast {
             value: NodeValue::Document,
             content: String::new(),
@@ -55,9 +93,9 @@ pub fn parse_document<'a>(arena: &'a Arena<'a>, md: &str, options: &Options) -> 
             last_line_blank: false,
             table_visited: false,
             kramdown_table_candidate: true,
+            end_columns_fixed: false,
             line_offsets: Vec::new(),
-        }
-        .into(),
+        },
     );
     let document = Parser::new(arena, root, options).parse(md);
     if options.parse.sourcepos_chars {
@@ -754,16 +792,20 @@ where
         // explicit stack for post-order traversal: (node, visited)
         let mut stack: Vec<(Node<'a>, bool)> = Vec::new();
 
-        for ch in container.children() {
+        for ch in unfixed_children(container) {
             stack.push((ch, false));
 
             while let Some((node, visited)) = stack.pop() {
                 if !visited {
                     stack.push((node, true));
-                    for c in node.children() {
+                    for c in unfixed_children(node) {
                         stack.push((c, false));
                     }
                 } else {
+                    {
+                        let mut ast = node.data_mut();
+                        ast.end_columns_fixed = !ast.open;
+                    }
                     let end_col = node.data().sourcepos.end.column;
                     if end_col == 0 {
                         if let Some(mut last_desc) = node.last_child() {
@@ -1913,7 +1955,7 @@ where
         assert!(start_column > 0);
 
         let child = Ast::new(value, (self.line_number, start_column).into());
-        let node = self.arena.alloc(child.into());
+        let node = alloc_node(self.arena, child);
         parent.append(node);
         node
     }
@@ -2496,12 +2538,12 @@ where
                         texts.push(("]".into(), 1));
 
                         for (text, span) in &mut texts {
-                            let inl = self.arena.alloc(
+                            let inl = alloc_node(
+                                self.arena,
                                 Ast::new_with_sourcepos(
                                     NodeValue::Text(mem::take(text).into()),
                                     (lc, lc.column_add(*span as isize - 1)).into(),
-                                )
-                                .into(),
+                                ),
                             );
                             target.insert_after(inl);
                             target = inl;
@@ -2733,18 +2775,16 @@ where
             }
 
             strings::remove_from_start(text.to_mut(), end);
-            parent.prepend(
-                self.arena.alloc(
-                    Ast::new_with_sourcepos(
-                        NodeValue::TaskItem(NodeTaskItem {
-                            symbol: if symbol == ' ' { None } else { Some(symbol) },
-                            symbol_sourcepos,
-                        }),
-                        *sourcepos,
-                    )
-                    .into(),
+            parent.prepend(alloc_node(
+                self.arena,
+                Ast::new_with_sourcepos(
+                    NodeValue::TaskItem(NodeTaskItem {
+                        symbol: if symbol == ' ' { None } else { Some(symbol) },
+                        symbol_sourcepos,
+                    }),
+                    *sourcepos,
                 ),
-            );
+            ));
         } else if node_matches!(parent, NodeValue::Paragraph) {
             if node.previous_sibling().is_some() || parent.previous_sibling().is_some() {
                 return;
@@ -2996,9 +3036,20 @@ fn lists_match(list_data: &NodeList, item_data: &NodeList) -> bool {
         && list_data.bullet_char == item_data.bullet_char
 }
 
+/// 子を後ろから、fix_zero_end_columns で直し終えた子の手前まで返す。
+/// 直し終えた子は前に並び、閉じ直した後に足した子だけが後ろに続くので、閉じ直すたびに全体を辿り直さずに済む
+/// (定義リストは項目を足すたびに閉じ直すので、全体を辿ると項目の数の 2 乗の時間がかかる)
+fn unfixed_children<'a>(node: Node<'a>) -> impl Iterator<Item = Node<'a>> {
+    node.reverse_children().take_while(|child| !child.data().end_columns_fixed)
+}
+
 fn reopen_ast_nodes(mut ast: Node<'_>) {
     loop {
-        ast.data_mut().open = true;
+        {
+            let mut data = ast.data_mut();
+            data.open = true;
+            data.end_columns_fixed = false;
+        }
         ast = match ast.parent() {
             Some(p) => p,
             None => return,

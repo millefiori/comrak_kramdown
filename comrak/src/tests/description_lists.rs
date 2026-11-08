@@ -192,3 +192,18 @@ fn sourcepos() {
         ])
     );
 }
+
+#[test]
+fn reopened_description_lists_finalize_in_linear_time() {
+    let mut options = Options::default();
+    options.extension.description_lists = true;
+    // 項目の間に空行があると、項目を足すたびに定義リストを閉じ直す (入れ子のリストは外側も閉じ直す)
+    for input in [
+        "a\n: b\n\n".repeat(20_000),
+        "a\n: b\n\n    c\n    : d\n\n".repeat(10_000),
+    ] {
+        let started = std::time::Instant::now();
+        markdown_to_html(&input, &options);
+        assert!(started.elapsed().as_secs() < 2, "{}", &input[..20]);
+    }
+}

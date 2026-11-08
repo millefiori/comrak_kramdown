@@ -32,6 +32,7 @@ mod html_;
 mod inline_footnotes;
 mod insert;
 mod math;
+mod max_nodes;
 mod multiline_block_quotes;
 #[path = "tests/options.rs"]
 mod options_;
