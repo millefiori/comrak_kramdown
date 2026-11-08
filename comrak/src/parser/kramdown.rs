@@ -455,8 +455,9 @@ mod tests {
     #[test]
     fn too_many_autocompleted_cells_stay_paragraph() {
         let wide = format!("{}\n", "a|".repeat(MAX_COLUMNS));
-        assert!(render(&format!("{wide}{}", "a|\n".repeat(400))).starts_with("<table>"));
-        assert!(render(&format!("{wide}{}", "a|\n".repeat(600))).starts_with("<p>"));
+        let rows_at_limit = MAX_AUTOCOMPLETED_CELLS / (MAX_COLUMNS - 1);
+        assert!(render(&format!("{wide}{}", "a|\n".repeat(rows_at_limit))).starts_with("<table>"));
+        assert!(render(&format!("{wide}{}", "a|\n".repeat(rows_at_limit + 1))).starts_with("<p>"));
     }
 
     #[test]

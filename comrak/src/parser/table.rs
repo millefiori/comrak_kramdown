@@ -9,7 +9,7 @@ use crate::strings::{count_newlines, is_line_end_char, newlines_of, trim_cow};
 
 // Limit to prevent a malicious input from causing a denial of service.
 // See get_num_autocompleted_cells.
-pub(crate) const MAX_AUTOCOMPLETED_CELLS: usize = 500_000;
+pub(crate) const MAX_AUTOCOMPLETED_CELLS: usize = 20_000;
 
 pub fn try_opening_block<'a>(
     parser: &mut Parser<'a, '_, '_>,
